@@ -215,7 +215,7 @@ def flash_linux_dd(device_id, file_path, verify=False):
 
         total_bytes_to_write = os.path.getsize(file_path)
         bytes_done  = 0
-        chunk_size  = 1024 * 1024 * 4  
+        chunk_size  = 1024 * 1024 * 4  # 4MB optimal buffer
 
         emit({"progress": 2, "status": "Initializing direct-to-metal stream..."})
 
@@ -332,6 +332,7 @@ def flash_windows_inverted_phantom(device_id, file_path, verify=False):
 
         emit({"progress": 5, "status": "Structuring Inverted Phantom Layout..."})
         
+        # INVERSION: Partition 1 is NTFS Payload. Partition 2 is FAT32 EFI Boot.
         dp_script = f"""select disk {disk_num}
 clean
 convert mbr
@@ -401,6 +402,7 @@ exit
                 rel_lower = rel_path.lower()
                 size = os.path.getsize(src_path)
                 
+                # Rule 1: EVERYTHING clones to Partition 1 (NTFS) so WinPE finds it.
                 dest_data = os.path.join(ntfs_guid, rel_path)
                 files_to_copy.append((src_path, dest_data, size))
                 total_copy_bytes += size
@@ -409,6 +411,7 @@ exit
                     payload_src_path = src_path
                     payload_dest_path = dest_data
 
+                # Rule 2: ONLY Boot-critical files go to Partition 2 (FAT32) for UEFI firmware.
                 is_boot_critical = (
                     rel_lower.startswith("efi\\") or 
                     rel_lower.startswith("boot\\") or 
@@ -443,28 +446,11 @@ exit
                     
                     elapsed = time.time() - start_time
                     speed = (copied_bytes / 1048576) / max(0.001, elapsed)
-                    progress = 10 + int((copied_bytes / total_copy_bytes) * 87) 
+                    progress = 10 + int((copied_bytes / total_copy_bytes) * 88) 
                     
                     if progress != last_reported:
                         last_reported = progress
-                        emit({"progress": min(97, progress), "status": f"Tunneling payload... {progress}% @ {speed:.2f} MB/s"})
-
-        emit({"progress": 97, "status": "Injecting OEM auto-detection flags..."})
-        
-        # --- THE FIX: FORCING WINDOWS TO READ THE MOTHERBOARD OEM KEY ---
-        ei_cfg_content = "[EditionID]\n\n[Channel]\nOEM\n[VL]\n0\n"
-        
-        ntfs_sources = os.path.join(ntfs_guid, "sources")
-        if os.path.exists(ntfs_sources):
-            with open(os.path.join(ntfs_sources, "ei.cfg"), "w") as f:
-                f.write(ei_cfg_content)
-
-        fat32_sources = os.path.join(fat32_guid, "sources")
-        if not os.path.exists(fat32_sources):
-            os.makedirs(fat32_sources, exist_ok=True)
-        with open(os.path.join(fat32_sources, "ei.cfg"), "w") as f:
-            f.write(ei_cfg_content)
-        # ----------------------------------------------------------------
+                        emit({"progress": min(98, progress), "status": f"Tunneling payload... {progress}% @ {speed:.2f} MB/s"})
 
         emit({"progress": 98, "status": "Injecting MBR boot attributes..."})
         bootsect_iso_path = os.path.join(iso_drive, "boot", "bootsect.exe")
