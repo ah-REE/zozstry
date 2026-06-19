@@ -12,6 +12,9 @@ from ctypes import wintypes
 # Global IPC Socket
 ipc_socket = None
 
+# Kill-Switch Flag
+CANCEL_FLAG = os.path.join(os.environ.get('TEMP', ''), 'zozstry_cancel.flag')
+
 def emit(data):
     payload = json.dumps(data)
     if ipc_socket:
@@ -23,6 +26,9 @@ def emit(data):
         print(payload)
         sys.stdout.flush()
 
+def check_cancel():
+    if os.path.exists(CANCEL_FLAG):
+        raise Exception("Process aborted by user. Drive may be in an incomplete state.")
 
 def is_admin():
     try:
@@ -215,7 +221,7 @@ def flash_linux_dd(device_id, file_path, verify=False):
 
         total_bytes_to_write = os.path.getsize(file_path)
         bytes_done  = 0
-        chunk_size  = 1024 * 1024 * 4  # 4MB optimal buffer
+        chunk_size  = 1024 * 1024 * 4  
 
         emit({"progress": 2, "status": "Initializing direct-to-metal stream..."})
 
@@ -238,6 +244,7 @@ def flash_linux_dd(device_id, file_path, verify=False):
         last_reported = -1
 
         while True:
+            check_cancel()
             chunk = fd_in.read(chunk_size)
             if not chunk: break
 
@@ -274,13 +281,16 @@ def flash_linux_dd(device_id, file_path, verify=False):
             emit({"progress": 99, "status": "Verifying data integrity..."})
             source_hash = hashlib.sha256()
             with open(file_path, "rb") as f:
-                while v_chunk := f.read(chunk_size): source_hash.update(v_chunk)
+                while v_chunk := f.read(chunk_size): 
+                    check_cancel()
+                    source_hash.update(v_chunk)
             
             usb_hash = hashlib.sha256()
             fd_read = os.open(device_id, os.O_RDONLY | getattr(os, "O_BINARY", 0))
             try:
                 bytes_read = 0
                 while bytes_read < total_bytes_to_write:
+                    check_cancel()
                     read_size = min(chunk_size, total_bytes_to_write - bytes_read)
                     v_chunk = os.read(fd_read, read_size)
                     if not v_chunk: break
@@ -304,11 +314,12 @@ def flash_linux_dd(device_id, file_path, verify=False):
             fd_in.close()
 
 
-def flash_windows_inverted_phantom(device_id, file_path, verify=False):
+def flash_windows_inverted_phantom(device_id, file_path, verify=False, force_gpt=False):
     """ The Inverted Phantom Architecture for Windows ISOs (NTFS USP) """
     iso_mounted = False
     try:
         disk_num = device_id.replace(r"\\.\PHYSICALDRIVE", "")
+        partition_style = "gpt" if force_gpt else "mbr"
         
         emit({"progress": 1, "status": "Mounting Windows ISO..."})
         ps_mount = f'Mount-DiskImage -ImagePath "{file_path}" -PassThru | Get-Volume | Select-Object -ExpandProperty DriveLetter'
@@ -332,16 +343,19 @@ def flash_windows_inverted_phantom(device_id, file_path, verify=False):
 
         emit({"progress": 5, "status": "Structuring Inverted Phantom Layout..."})
         
+        # Only MBR disks support the active boot flag in diskpart
+        active_cmd = "active" if partition_style == "mbr" else ""
+        
         # INVERSION: Partition 1 is NTFS Payload. Partition 2 is FAT32 EFI Boot.
         dp_script = f"""select disk {disk_num}
 clean
-convert mbr
+convert {partition_style}
 create partition primary size={data_size_mb}
 format fs=ntfs quick label="ZOZ_DATA"
 assign
 create partition primary
 format fs=fat32 quick label="ZOZ_BOOT"
-active
+{active_cmd}
 assign
 exit
 """
@@ -439,6 +453,7 @@ exit
             
             with open(src, 'rb') as fsrc, open(dest, 'wb') as fdst:
                 while True:
+                    check_cancel()
                     chunk = fsrc.read(1024 * 1024 * 4) 
                     if not chunk: break
                     fdst.write(chunk)
@@ -463,11 +478,15 @@ exit
             emit({"progress": 99, "status": "Executing cryptographic verification..."})
             src_hash = hashlib.sha256()
             with open(payload_src_path, "rb") as f:
-                while chunk := f.read(1024 * 1024 * 4): src_hash.update(chunk)
+                while chunk := f.read(1024 * 1024 * 4): 
+                    check_cancel()
+                    src_hash.update(chunk)
                 
             dest_hash = hashlib.sha256()
             with open(payload_dest_path, "rb") as f:
-                while chunk := f.read(1024 * 1024 * 4): dest_hash.update(chunk)
+                while chunk := f.read(1024 * 1024 * 4): 
+                    check_cancel()
+                    dest_hash.update(chunk)
                 
             if src_hash.hexdigest() != dest_hash.hexdigest():
                 raise Exception("Verification Failed: Corrupted payload detected on USB.")
@@ -482,8 +501,12 @@ exit
             subprocess.run(["powershell", "-Command", ps_unmount], capture_output=True)
 
 
-def flash_drive(device_id, file_path, verify=False):
+def flash_drive(device_id, file_path, verify=False, force_gpt=False, persistent_mb=0):
     """ The Auto-Sense Engine Router """
+    if os.path.exists(CANCEL_FLAG):
+        try: os.remove(CANCEL_FLAG)
+        except: pass
+
     try:
         verify_safety(device_id)
         
@@ -507,9 +530,10 @@ def flash_drive(device_id, file_path, verify=False):
 
         if os_type == "WINDOWS":
             emit({"progress": 0, "status": "Windows OS detected. Initializing Inverted Phantom Router..."})
-            flash_windows_inverted_phantom(device_id, file_path, verify)
+            flash_windows_inverted_phantom(device_id, file_path, verify, force_gpt)
         else:
             emit({"progress": 0, "status": "Linux OS detected. Initializing Direct Block Writer..."})
+            # Persistent storage logic will eventually go here
             flash_linux_dd(device_id, file_path, verify)
 
     except PermissionError:
@@ -562,7 +586,17 @@ if __name__ == "__main__":
 
             if command == "--flash":
                 verify_flag = "--verify" in sys.argv
-                flash_drive(sys.argv[2], sys.argv[3], verify=verify_flag)
+                force_gpt_flag = "--force-gpt" in sys.argv
+                
+                persistent_mb = 0
+                if "--persistent" in sys.argv:
+                    try:
+                        p_idx = sys.argv.index("--persistent")
+                        persistent_mb = int(sys.argv[p_idx + 1])
+                    except:
+                        pass
+                
+                flash_drive(sys.argv[2], sys.argv[3], verify=verify_flag, force_gpt=force_gpt_flag, persistent_mb=persistent_mb)
             elif command == "--restore":
                 restore_drive(sys.argv[2])
                 
