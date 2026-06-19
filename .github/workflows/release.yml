@@ -1,0 +1,47 @@
+name: Build and Release
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Compile Python Engine
+        run: |
+          pip install pyinstaller
+          pyinstaller --onefile --noconsole backend/engine.py
+          mkdir -p src-tauri/bin
+          move dist/engine.exe src-tauri/bin/engine-x86_64-pc-windows-msvc.exe
+
+      - name: Install Frontend Dependencies
+        # Note: Change to `yarn install` or `pnpm install` if you don't use npm
+        run: npm install
+
+      - name: Build Tauri App
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Zozstry ${{ github.ref_name }}'
+          releaseBody: 'Automated release setup.'
+          releaseDraft: true
+          prerelease: false
