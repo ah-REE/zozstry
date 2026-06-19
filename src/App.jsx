@@ -15,6 +15,7 @@ export default function App() {
   const [flashProgress, setFlashProgress] = useState(0);
   const [flashStatus, setFlashStatus] = useState("");
   const [speed, setSpeed] = useState("");
+  const [logs, setLogs] = useState([]); 
   
   // Modal States
   const [showInfo, setShowInfo] = useState(false);
@@ -32,6 +33,43 @@ export default function App() {
   useEffect(() => {
     if (autoVerify) setVerifyData(true);
   }, [autoVerify]);
+
+  // Ensure the IPC listener only binds once on app mount to prevent double-logging
+  useEffect(() => {
+    let unlisten;
+    const setup = async () => {
+      unlisten = await listen("flash-progress", (event) => {
+        try {
+          const data = JSON.parse(event.payload);
+          
+          setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${data.status || JSON.stringify(data)}`]);
+
+          if (data.error) {
+             setErrorMsg(data.error);
+             setIsFlashing(false);
+          } else {
+             setFlashProgress(data.progress);
+             
+             const statusParts = data.status.split(" @ ");
+             setFlashStatus(statusParts[0]);
+             if (statusParts.length > 1) {
+               setSpeed(statusParts[1]);
+             } else {
+               setSpeed("");
+             }
+
+             if (data.progress === 100) setIsFlashing(false);
+          }
+        } catch (e) {
+          setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [RAW] ${event.payload}`]);
+        }
+      });
+    };
+    setup();
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
 
   const scanDrives = async () => {
     try {
@@ -57,32 +95,6 @@ export default function App() {
     } catch (error) {}
   };
 
-  const setupListener = async () => {
-    return await listen("flash-progress", (event) => {
-      try {
-        const data = JSON.parse(event.payload);
-        if (data.error) {
-           setErrorMsg(data.error);
-           setIsFlashing(false);
-        } else {
-           setFlashProgress(data.progress);
-           
-           const statusParts = data.status.split(" @ ");
-           setFlashStatus(statusParts[0]);
-           if (statusParts.length > 1) {
-             setSpeed(statusParts[1]);
-           } else {
-             setSpeed("");
-           }
-
-           if (data.progress === 100) setIsFlashing(false);
-        }
-      } catch (e) {
-        console.error("Parse error", e);
-      }
-    });
-  };
-
   const handleFlash = async () => {
     if (!selectedDrive || !isoFile) return;
 
@@ -99,13 +111,15 @@ export default function App() {
     setFlashStatus("Initializing engine...");
     setSpeed("");
     setErrorMsg(null);
+    setLogs([]); 
 
-    await setupListener();
     try {
       await invoke("flash_drive", { 
         deviceId: selectedDrive, 
         isoPath: isoFile, 
-        verify: verifyData 
+        verify: verifyData,
+        forceGpt: forceGpt,
+        persistentStorage: parseInt(persistentStorage)
       });
     } catch (err) {
       setErrorMsg(err.toString());
@@ -126,6 +140,7 @@ export default function App() {
       await invoke("cancel_flash");
       setIsFlashing(false);
       setErrorMsg("Process aborted by user. You may need to use 'Restore Drive' to fix the USB.");
+      setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [SYSTEM] Process manually aborted by user.`]);
     } catch (err) {
       console.error(err);
     }
@@ -136,7 +151,7 @@ export default function App() {
     
     if (!skipWarnings) {
       const isConfirmed = await ask(
-        "WARNING: This will completely wipe the selected drive to restore it to a single partition.\n\nContinue?", 
+        "WARNING: This will completely wipe the selected drive back to its original state.\n\nAre you sure you want to continue?", 
         { title: "Confirm Drive Restore", kind: "warning" }
       );
       if (!isConfirmed) return;
@@ -147,8 +162,8 @@ export default function App() {
     setFlashStatus("Initializing restore...");
     setSpeed("");
     setErrorMsg(null);
+    setLogs([]); 
 
-    await setupListener();
     try {
       await invoke("restore_drive", { deviceId: selectedDrive });
     } catch (err) {
@@ -162,7 +177,8 @@ export default function App() {
   const displayIsoName = isoFile ? (isoFile.split('\\').pop() || isoFile.split('/').pop()) : "";
 
   return (
-    <main className="min-h-screen bg-[#0a0a0c] text-white p-6 flex flex-col items-center justify-center relative overflow-hidden font-sans">
+    <main className="fixed inset-0 w-screen h-screen bg-[#0a0a0c] text-white flex items-center justify-center font-sans overflow-hidden">
+      {/* Background blurs */}
       <div className="absolute top-[-20%] left-[-10%] w-[500px] h-[500px] bg-indigo-600/20 rounded-full blur-[120px] pointer-events-none" />
       <div className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] bg-blue-600/10 rounded-full blur-[150px] pointer-events-none" />
 
@@ -195,17 +211,17 @@ export default function App() {
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.5, ease: "easeOut" }}
-        className="w-full max-w-xl bg-white/[0.02] backdrop-blur-2xl border border-white/10 rounded-3xl shadow-2xl relative z-10 flex flex-col"
+        className="w-full max-w-xl max-h-[90vh] flex flex-col bg-white/[0.02] backdrop-blur-2xl border border-white/10 rounded-3xl shadow-2xl relative z-10"
       >
-        <div className="px-8 py-2 border-b border-white/5 flex items-center justify-center">
+        <div className="px-8 py-5 border-b border-white/5 flex items-center justify-center flex-shrink-0">
           <img 
             src={logo} 
             alt="Zozstry Logo" 
-            className="h-24 object-contain drop-shadow-[0_0_15px_rgba(37,99,235,0.4)]" 
+            className="h-20 object-contain drop-shadow-[0_0_15px_rgba(37,99,235,0.4)]" 
           />
         </div>
 
-        <div className="p-8 space-y-8 flex-1">
+        <div className="p-8 space-y-6 flex-1 overflow-y-auto custom-scrollbar min-h-0">
           <section>
             <div className="flex items-center gap-2 mb-3">
               <span className="flex items-center justify-center w-6 h-6 rounded-full bg-indigo-500/20 text-indigo-400 text-xs font-bold">1</span>
@@ -253,7 +269,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="bg-black/20 border border-white/5 rounded-2xl p-2 max-h-[160px] overflow-y-auto custom-scrollbar inset-shadow-sm">
+            <div className="bg-black/20 border border-white/5 rounded-2xl p-2 max-h-[140px] overflow-y-auto custom-scrollbar inset-shadow-sm">
               {scanning ? (
                 <div className="flex flex-col items-center justify-center py-6 text-neutral-500">
                   <svg className="w-6 h-6 animate-spin mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
@@ -282,7 +298,7 @@ export default function App() {
             </div>
           </section>
 
-          <div className="flex items-center justify-between px-4 py-3 bg-white/5 rounded-xl border border-white/5">
+          <div className="flex items-center justify-between px-4 py-3 bg-white/5 rounded-xl border border-white/5 flex-shrink-0">
              <span className="text-sm font-medium text-neutral-300 flex items-center gap-2">
                <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
                Verify Data Integrity
@@ -295,7 +311,7 @@ export default function App() {
 
           <AnimatePresence>
             {errorMsg && (
-              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden flex-shrink-0">
                 <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 flex items-start gap-3">
                   <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                   <p className="text-xs font-mono whitespace-pre-wrap break-words">{errorMsg}</p>
@@ -305,7 +321,8 @@ export default function App() {
           </AnimatePresence>
         </div>
 
-        <div className="p-8 pt-0 mt-auto">
+        {/* Static Footer */}
+        <div className="p-6 border-t border-white/5 flex-shrink-0 bg-black/20 rounded-b-3xl">
           <div className="relative overflow-hidden rounded-2xl bg-black/40 border border-white/10 inset-shadow-sm">
             {isFlashing && (
               <motion.div 
@@ -322,9 +339,9 @@ export default function App() {
               <div className="pl-4 py-2 flex-1">
                 {isFlashing ? (
                   <div className="flex items-center justify-between pr-4 relative z-20">
-                    <div className="flex flex-col pointer-events-none">
+                    <div className="flex flex-col pointer-events-none overflow-hidden">
                       <span className="text-sm font-bold text-white mb-0.5 drop-shadow-md">{flashProgress}% Complete</span>
-                      <span className="text-[11px] text-white/80 font-medium truncate">{flashStatus}</span>
+                      <span className="text-[11px] text-white/80 font-medium truncate max-w-[200px]">{flashStatus}</span>
                     </div>
                     <div className="flex items-center gap-4">
                       {speed && (
@@ -335,7 +352,7 @@ export default function App() {
                       )}
                       <button
                         onClick={handleCancel}
-                        className="ml-2 w-8 h-8 flex items-center justify-center rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/40 hover:text-red-200 transition-colors cursor-pointer border border-red-500/30"
+                        className="ml-2 flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/40 hover:text-red-200 transition-colors cursor-pointer border border-red-500/30"
                         title="Cancel Process"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
@@ -365,6 +382,25 @@ export default function App() {
               )}
             </div>
           </div>
+          
+          {/* Debug Console Display */}
+          <AnimatePresence>
+            {debugMode && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0, marginTop: 0 }} 
+                animate={{ opacity: 1, height: '70px', marginTop: '12px' }} 
+                exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                className="bg-black/60 border border-white/10 rounded-xl p-3 overflow-y-auto font-mono text-[10px] leading-relaxed text-green-400 custom-scrollbar shadow-inner allow-select"
+              >
+                {logs.length === 0 ? (
+                  <span className="text-green-400/50">Waiting for engine output...</span>
+                ) : (
+                  logs.map((log, i) => <div key={i} className="whitespace-pre-wrap">{log}</div>)
+                )}
+                <div ref={(el) => el?.scrollIntoView({ behavior: 'smooth' })} />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </motion.div>
 
@@ -373,11 +409,11 @@ export default function App() {
         {showInfo && (
           <motion.div 
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
+            className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6 overflow-y-auto"
           >
             <motion.div 
               initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
-              className="w-full max-w-md bg-[#0a0a0c] border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+              className="w-full max-w-md bg-[#0a0a0c] border border-white/10 rounded-2xl shadow-2xl overflow-hidden m-auto"
             >
               <div className="p-6 border-b border-white/5 flex items-center justify-between">
                 <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -415,11 +451,11 @@ export default function App() {
         {showSettings && (
           <motion.div 
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
+            className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6 overflow-y-auto"
           >
             <motion.div 
               initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
-              className="w-full max-w-md bg-[#0a0a0c] border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+              className="w-full max-w-md bg-[#0a0a0c] border border-white/10 rounded-2xl shadow-2xl overflow-hidden m-auto"
             >
               <div className="p-6 border-b border-white/5 flex items-center justify-between">
                 <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -447,6 +483,20 @@ export default function App() {
                   </label>
                 </div>
 
+                <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/5 opacity-50 pointer-events-none">
+                  <div className="flex flex-col">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-white">Force GPT Partitioning</span>
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-yellow-400 px-1.5 py-0.5 bg-yellow-500/10 rounded-md border border-yellow-500/20">Coming Soon</span>
+                    </div>
+                    <span className="text-xs font-medium text-neutral-400 mt-0.5">Bypass MBR for strict UEFI motherboards</span>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" className="sr-only peer" checked={false} disabled />
+                    <div className="w-11 h-6 bg-black/40 peer-focus:outline-none rounded-full peer peer-disabled:opacity-50 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-neutral-500 after:border-neutral-600 after:border after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
+                  </label>
+                </div>
+
                 <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/5">
                   <div className="flex flex-col">
                     <span className="text-sm font-medium text-white">Skip Safety Warnings</span>
@@ -455,17 +505,6 @@ export default function App() {
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input type="checkbox" className="sr-only peer" checked={skipWarnings} onChange={() => setSkipWarnings(!skipWarnings)} />
                     <div className="w-11 h-6 bg-black/40 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-neutral-300 after:border-neutral-500 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-500"></div>
-                  </label>
-                </div>
-
-                <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/5">
-                  <div className="flex flex-col">
-                    <span className="text-sm font-medium text-white">Force GPT Partitioning</span>
-                    <span className="text-xs font-medium text-neutral-400">Bypass MBR for strict UEFI motherboards</span>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" className="sr-only peer" checked={forceGpt} onChange={() => setForceGpt(!forceGpt)} />
-                    <div className="w-11 h-6 bg-black/40 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-neutral-300 after:border-neutral-500 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
                   </label>
                 </div>
 

@@ -168,8 +168,11 @@ assign
 exit
 """
         build_res = subprocess.run(["diskpart"], input=dp_script, capture_output=True, text=True)
+        
+        emit({"status": f"[DEBUG] Diskpart Restore Output:\n{build_res.stdout.strip()}"})
+        
         if build_res.returncode != 0 or ("successfully" not in build_res.stdout.lower() and "succeeded" not in build_res.stdout.lower()):
-            raise Exception(f"Diskpart failed to build and format partition: {build_res.stdout.strip()}")
+            raise Exception(f"Diskpart failed to build and format partition. Check Debug Console.")
             
         time.sleep(2)
 
@@ -343,10 +346,8 @@ def flash_windows_inverted_phantom(device_id, file_path, verify=False, force_gpt
 
         emit({"progress": 5, "status": "Structuring Inverted Phantom Layout..."})
         
-        # Only MBR disks support the active boot flag in diskpart
         active_cmd = "active" if partition_style == "mbr" else ""
         
-        # INVERSION: Partition 1 is NTFS Payload. Partition 2 is FAT32 EFI Boot.
         dp_script = f"""select disk {disk_num}
 clean
 convert {partition_style}
@@ -357,33 +358,38 @@ create partition primary
 format fs=fat32 quick label="ZOZ_BOOT"
 {active_cmd}
 assign
+rescan
 exit
 """
+        emit({"status": "[DEBUG] Running Diskpart. Please wait..."})
         build_res = subprocess.run(["diskpart"], input=dp_script, capture_output=True, text=True)
-        if build_res.returncode != 0:
-            raise Exception("Diskpart failed to construct inverted partitions.")
+        
+        # EXPLICITLY output diskpart errors to the debug console
+        emit({"status": f"[DEBUG] Diskpart Flash Output:\n{build_res.stdout.strip()}"})
+        
+        if "Virtual Disk Service error" in build_res.stdout or "encountered an error" in build_res.stdout:
+            raise Exception("Diskpart formatting failed. Open Debug Console in Settings to see exact error.")
         
         time.sleep(3)
 
-        emit({"progress": 8, "status": "Mapping kernel volumes..."})
+        emit({"progress": 8, "status": "Mapping WMI Kernel volumes..."})
         fat32_guid = None
         fat32_letter = None
         ntfs_guid = None
         ntfs_letter = None
         
+        # Bypasses the storage cache lag entirely by directly hitting the WMI hardware object
         ps_get_volumes = f"""
-        Update-HostStorageCache
-        $parts = Get-Partition -DiskNumber {disk_num} -ErrorAction SilentlyContinue
-        foreach ($p in $parts) {{
-            $vol = Get-Volume -Partition $p -ErrorAction SilentlyContinue
-            if ($vol) {{
-                $letter = if ($vol.DriveLetter) {{ $vol.DriveLetter }} else {{ "NONE" }}
-                Write-Output "$($vol.FileSystemLabel)|$($vol.Path)|$letter"
+        $vols = Get-WmiObject Win32_Volume
+        foreach ($v in $vols) {{
+            if ($v.Label -eq 'ZOZ_BOOT' -or $v.Label -eq 'ZOZ_DATA') {{
+                $letter = if ($v.DriveLetter) {{ $v.DriveLetter }} else {{ "NONE" }}
+                Write-Output "$($v.Label)|$($v.DeviceID)|$letter"
             }}
         }}
         """
         
-        for _ in range(15):
+        for _ in range(30):
             res = subprocess.run(["powershell", "-Command", ps_get_volumes], capture_output=True, text=True)
             for line in res.stdout.strip().split('\n'):
                 parts = line.split('|')
@@ -398,10 +404,10 @@ exit
             
             if fat32_guid and ntfs_guid: 
                 break
-            time.sleep(1)
+            time.sleep(1.5)
             
         if not fat32_guid or not ntfs_guid:
-            raise Exception("Kernel failed to expose the hidden Volume GUIDs.")
+            raise Exception("Kernel failed to expose the hidden Volume GUIDs. Open Debug Console to see if Diskpart failed.")
 
         emit({"progress": 10, "status": "Calculating Phantom routes..."})
         files_to_copy = []
