@@ -1,91 +1,81 @@
 <div align="center">
-  <img src="src/assets/logo.png" alt="Zozstry Logo" width="180">
+  <img src="src/assets/logo-readme.png" alt="Zozstry Logo" width="500">
 
-  # ZOZSTRY
-  **Ignition Engine for High-Performance Bootable Deployments.**
+  # 
+  **The High-Performance USB Boot Utility.**
 
-  [![Tauri](https://img.shields.io/badge/Tauri-Build-blue?logo=tauri&logoColor=white)](#)
-  [![React](https://img.shields.io/badge/React-UI-61dafb?logo=react&logoColor=black)](#)
-  [![Python](https://img.shields.io/badge/Python-Engine-3776AB?logo=python&logoColor=white)](#)
-  
-  *Ditch FAT32 Limits. Preserve 4GB+ Windows payloads. Auto-inject OEM Keys. Outsmart UEFI.*
+  [![Tauri](https://img.shields.io/badge/Tauri-Build-blue?logo=tauri&logoColor=white&style=for-the-badge)](#)
+  [![React](https://img.shields.io/badge/React-UI-61dafb?logo=react&logoColor=black&style=for-the-badge)](#)
+  [![Python](https://img.shields.io/badge/Python-Engine-3776AB?logo=python&logoColor=white&style=for-the-badge)](#)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](#)
+
+  *Format effortlessly. Bypass limits natively. Deploy rapidly.*
 </div>
 
 ---
 
-## ⚡ What is Zozstry?
+### 📖 Overview
 
-Zozstry is a modern, blazing-fast bootable USB creator architected with React, Tauri, and a low-level Python core. It was specifically engineered to solve the deployment nightmares caused by modern UEFI firmware and massive OS payloads (like Windows 10/11 `.wim` files exceeding the 4GB FAT32 limit)—all without requiring cumbersome file splitting or disabling Secure Boot.
+**Zozstry** is an ultra-fast, open-source bootable USB creator. Engineered with a low-level Python core and a sleek React/Tauri interface, it solves deployment headaches caused by modern UEFI firmware. It seamlessly handles OS payloads that exceed the FAT32 size limit without requiring cumbersome file splitting or compromising Secure Boot.
 
-## 🧠 The Core Innovation: **Inverted Phantom Architecture**
+---
 
-Traditional imaging tools fail when writing a >4GB Windows payload to a UEFI-compatible FAT32 drive. They either force you to manually split the files, or they use custom drivers that trigger Secure Boot violations.
+### ✨ Signature Features
 
-**Zozstry solves this natively via physical drive geometry.**
+*   **Inverted Phantom Architecture:** Natively bypass the 4GB FAT32 limit for massive Windows `.wim` payloads using a highly compatible NTFS/FAT32 dual-partition layout.
+*   **Direct-to-Metal Linux Flashing:** Automatically detect and deploy Linux ISOs utilizing raw, block-by-block hardware writes (`dd`-style) for flawless reliability.
+*   **Active Hardware Protection:** Built-in WMI/BusType polling actively interrogates the target drive. If it isn't a verified removable USB, the engine physically aborts to protect your internal data.
+*   **One-Click Drive Restoration:** Instantly wipe, reformat, and reset complex multi-partition bootable USBs back to a clean, single-partition state.
+*   **Glassmorphic UI:** A responsive, modern interface built with React and Framer Motion for a premium user experience.
 
-Our custom Python engine executes the **Inverted Phantom Architecture**:
-1. **The Inversion:** Zozstry physically formats the USB with a massive **Partition 1 (NTFS)**, followed by a tiny **Partition 2 (FAT32)** at the very end of the drive.
-2. **The Routing:** The entire ISO—including the massive `install.wim` payload—is cloned into the NTFS partition. Only the critical EFI bootloaders are copied to the FAT32 partition.
-3. **The Firmware Deception:** Motherboard UEFI firmware natively scans the silicon, finds the FAT32 signature at the end of the drive, and boots the PC flawlessly.
-4. **The WinPE Handoff:** Because the NTFS payload is sitting in Partition 1, the Windows Preinstallation Environment (WinPE) is forced to mount it as the primary drive. It discovers the payload exactly where it expects it, completely bypassing the notorious "Missing Media Driver" error.
+---
 
-## 🔥 Key Features
+### ⚙️ Under the Hood
 
-* **FAT32 Limit Bypass:** Deploy massive Windows images seamlessly using the NTFS/FAT32 Inverted Phantom layout.
-* **OEM Key Auto-Injection:** Zozstry dynamically synthesizes and injects an `ei.cfg` override during the flash. This cures WinPE "split-brain," forcing `setup.exe` to read your motherboard's ACPI MSDM tables and automatically activate your correct Windows edition.
-* **Direct-to-Metal Linux Flashing:** Detects Linux ISOs automatically and executes raw, block-by-block hardware writes (`dd`-style) for maximum deployment speed.
-* **Hardware Safety Locks:** The engine actively interrogates the WMI/BusType of the selected target. If the device isn't a verified USB removable drive, the engine physically aborts to protect your internal drives.
-* **Glassmorphic UI:** Built with React and Framer Motion for a sleek, minimalist, and responsive experience.
+| Component | Technology | Purpose |
+| :--- | :--- | :--- |
+| **Frontend** | React, Tailwind, Framer Motion | Drives the beautiful, fluid Glassmorphic interface. |
+| **Framework** | Tauri | Delivers a highly optimized, cross-platform desktop environment. |
+| **Backend Core** | Python 3.x | Handles raw I/O (`\\.\PHYSICALDRIVE`), `diskpart` tunneling, and WMI polling. |
 
-## 🛠️ Built With
+---
 
-* **Frontend:** React, Tailwind CSS, Framer Motion
-* **App Framework:** Tauri (Cross-platform desktop runtime)
-* **Backend Core:** Python (Low-level `ctypes` hardware interaction, WMI polling, and `diskpart` tunneling)
+### 🛠️ Developer Setup
 
-## 🚀 Developer Setup
+To build and test Zozstry locally, ensure **Node.js**, **Rustup**, and **Python 3.x** are installed on your system.
 
-To run or build Zozstry locally, ensure you have **Node.js**, **Rustup**, and **Python 3.x** installed.
-
-1. **Clone the Repository**
-   ```bash
+1. **Clone the Repository:**
+```bash
    git clone [https://github.com/ah-REE/zozstry.git](https://github.com/ah-REE/zozstry.git)
    cd zozstry
    ```
 
-2. **Install Frontend Dependencies**
-   ```bash
+2. **Install Dependencies:**
+```bash
    npm install
    ```
 
-3. **Install Rust Target (Windows)**
-   ```bash
+3. **Add the Windows Target (Rust):**
+```bash
    rustup target add x86_64-pc-windows-msvc
    ```
 
-4. **Run in Development Mode**
-   ```bash
+4. **Launch the Development Environment:**
+```bash
    npm run tauri dev
    ```
 
-> [!WARNING]  
-> **Administrator Privileges Required:** Because the Python engine executes low-level direct disk writes and volume dropping, your terminal (or compiled app) **must be launched as an Administrator** to seize raw hardware handles (`\\.\PHYSICALDRIVE`).
-
-## 🤝 Contributing
-
-Contributions make the open-source community an incredible place to learn and create. Any contributions you make are **greatly appreciated**.
-
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## 📄 License
-
-Distributed under the MIT License. See `LICENSE` for more information.
+> **⚠️ Critical Note on Permissions:** 
+> Because Zozstry performs low-level partition manipulation, volume dropping, and direct disk writes, your terminal or IDE **must be launched as an Administrator** to function correctly.
 
 ---
+
+### 📜 License & Links
+
+*   **Repository:** [GitHub/ah-REE/zozstry](https://github.com/ah-REE/zozstry)
+*   **Issue Tracker:** [Report a Bug or Request a Feature](https://github.com/ah-REE/zozstry/issues)
+*   **License:** 100% Free Software under the **MIT License**.
+
 <div align="center">
-  <b>Engineered by ah-REE. Ignited for Performance.</b>
+  <i>Engineered by <b>ah-REE</b>.</i>
 </div>
