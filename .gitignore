@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# PyInstaller Artifacts
+backend/build/
+backend/dist/
+backend/engine.spec
