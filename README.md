@@ -7,6 +7,7 @@
   [![Tauri](https://img.shields.io/badge/Tauri-Build-blue?logo=tauri&logoColor=white&style=for-the-badge)](#)
   [![React](https://img.shields.io/badge/React-UI-61dafb?logo=react&logoColor=black&style=for-the-badge)](#)
   [![Python](https://img.shields.io/badge/Python-Engine-3776AB?logo=python&logoColor=white&style=for-the-badge)](#)
+  [![Windows Only](https://img.shields.io/badge/OS-Windows_10%2B-0078D6?logo=windows&logoColor=white&style=for-the-badge)](#)
   [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg?style=for-the-badge)](https://www.gnu.org/licenses/gpl-3.0)
 
   *Format effortlessly. Bypass limits natively. Deploy rapidly.*
@@ -17,6 +18,8 @@
 ### 📖 Overview
 
 **Zozstry** is an ultra-fast, open-source bootable USB creator. Engineered with a low-level Python core and a sleek React/Tauri interface, it solves deployment headaches caused by modern UEFI firmware. It seamlessly handles OS payloads that exceed the FAT32 size limit without requiring cumbersome file splitting or compromising Secure Boot.
+
+*(Currently available for Windows 10 and 11).*
 
 ---
 
@@ -46,8 +49,10 @@
 For standard users, there is no need to install Python or Rust. Simply download the pre-compiled standalone executable:
 
 1. Navigate to the **[Releases](https://github.com/ah-REE/zozstry/releases)** page on GitHub.
-2. Download the latest `.exe` installer (e.g., `Zozstry_Setup_v1.0.0.exe`).
+2. Download the latest `.exe` installer.
 3. Run the installer and launch Zozstry. 
+
+> **⚠️ Windows SmartScreen Note:** Zozstry is a new, open-source application. When you first run the installer, Windows SmartScreen may flag it as an "Unknown Publisher." To proceed, simply click **More Info** -> **Run anyway**.
 
 > **Note:** Zozstry requires Administrator privileges to perform raw disk I/O operations and will automatically prompt for UAC elevation upon flashing.
 
@@ -59,17 +64,30 @@ To build and test Zozstry locally, ensure **Node.js**, **Python 3.x**, and **Rus
 
 1. **Clone the Repository:**
    ```bash
-   git clone [https://github.com/ah-REE/zozstry.git](https://github.com/ah-REE/zozstry.git)
+   git clone https://github.com/ah-REE/zozstry.git
    cd zozstry
    ```
 
-2. **Install Dependencies:**
+2. **Install Frontend Dependencies:**
    ```bash
    npm install
    ```
 
-3. **Launch the Development Environment:**
+3. **Install Backend Dependencies:**
    ```bash
+   pip install pyinstaller pillow
+   ```
+
+4. **Compile the Python Engine & Launch:**
+   Zozstry requires the Python backend to be compiled into a standalone executable before Tauri can bundle the app.
+   ```bash
+   # 1. Compile the backend
+   pyinstaller --onefile backend/engine.py
+
+   # 2. Move the executable to the Tauri sidecar directory
+   # (Ensure the filename matches your architecture, e.g., zozstry-core-x86_64-pc-windows-msvc.exe)
+
+   # 3. Launch the Development Environment
    npm run tauri dev
    ```
 
