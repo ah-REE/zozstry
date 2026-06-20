@@ -31,8 +31,8 @@ jobs:
         run: |
           pip install pyinstaller
           pyinstaller --onefile --version-file backend/version.txt --icon src-tauri/icons/icon.ico backend/engine.py
-          mkdir -p src-tauri/bin
-          move dist/engine.exe src-tauri/bin/zozstry-core-x86_64-pc-windows-msvc.exe
+          New-Item -ItemType Directory -Force -Path src-tauri\bin
+          Move-Item -Path dist\engine.exe -Destination src-tauri\bin\zozstry-core-x86_64-pc-windows-msvc.exe -Force
 
       - name: Install Frontend Dependencies
         run: npm install
