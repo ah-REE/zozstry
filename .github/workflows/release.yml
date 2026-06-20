@@ -30,12 +30,11 @@ jobs:
       - name: Compile Python Engine
         run: |
           pip install pyinstaller
-          pyinstaller --onefile --noconsole backend/engine.py
+          pyinstaller --onefile --version-file backend/version.txt --icon src-tauri/icons/icon.ico backend/engine.py
           mkdir -p src-tauri/bin
-          move dist/engine.exe src-tauri/bin/engine-x86_64-pc-windows-msvc.exe
+          move dist/engine.exe src-tauri/bin/zozstry-core-x86_64-pc-windows-msvc.exe
 
       - name: Install Frontend Dependencies
-        # Note: Change to `yarn install` or `pnpm install` if you don't use npm
         run: npm install
 
       - name: Build Tauri App

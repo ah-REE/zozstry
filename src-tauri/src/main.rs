@@ -8,7 +8,7 @@ use tauri_plugin_shell::process::CommandEvent;
 
 #[tauri::command]
 async fn get_usb_drives(app_handle: tauri::AppHandle) -> Result<String, String> {
-    let sidecar_command = app_handle.shell().sidecar("engine").map_err(|e| e.to_string())?;
+    let sidecar_command = app_handle.shell().sidecar("zozstry-core").expect("Failed to initialize sidecar");
     let output = sidecar_command.output().await.map_err(|e| e.to_string())?;
     
     if output.status.success() {
@@ -27,7 +27,7 @@ async fn flash_drive(
     force_gpt: bool,
     persistent_storage: u32,
 ) -> Result<(), String> {
-    let mut sidecar_cmd = app_handle.shell().sidecar("engine").map_err(|e| e.to_string())?;
+    let mut sidecar_cmd = app_handle.shell().sidecar("zozstry-core").map_err(|e| e.to_string())?;
     sidecar_cmd = sidecar_cmd.args(["--flash", &device_id, &iso_path]);
 
     if verify {
@@ -57,8 +57,8 @@ async fn flash_drive(
 
 #[tauri::command]
 async fn restore_drive(app_handle: tauri::AppHandle, device_id: String) -> Result<(), String> {
-    let sidecar_cmd = app_handle.shell().sidecar("engine").map_err(|e| e.to_string())?;
-    let (mut rx, mut _child) = sidecar_cmd.args(["--restore", &device_id]).spawn().map_err(|e| e.to_string())?;
+    let sidecar_command = app_handle.shell().sidecar("zozstry-core").expect("Failed to initialize sidecar");
+    let (mut rx, mut _child) = sidecar_command.args(["--restore", &device_id]).spawn().map_err(|e| e.to_string())?;
 
     tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {

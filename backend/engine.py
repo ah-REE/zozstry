@@ -173,8 +173,6 @@ exit
 """
         build_res = run_cmd(["diskpart"], input=dp_script, capture_output=True, text=True)
         
-        emit({"status": f"[DEBUG] Diskpart Restore Output:\n{build_res.stdout.strip()}"})
-        
         if build_res.returncode != 0 or ("successfully" not in build_res.stdout.lower() and "succeeded" not in build_res.stdout.lower()):
             raise Exception(f"Diskpart failed to build and format partition. Check Debug Console.")
             
@@ -227,15 +225,14 @@ def flash_linux_dd(device_id, file_path, verify=False):
 
         total_bytes_to_write = os.path.getsize(file_path)
         bytes_done  = 0
-        chunk_size  = 1024 * 1024 * 4  
+        chunk_size  = 1024 * 1024 * 16
 
         emit({"progress": 2, "status": "Initializing direct-to-metal stream..."})
 
         flags_standard = os.O_RDWR | getattr(os, "O_BINARY", 0)
         FILE_FLAG_NO_BUFFERING = 0x20000000
-        FILE_FLAG_WRITE_THROUGH = 0x80000000
-        
-        raw_flags = flags_standard | FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH
+
+        raw_flags = flags_standard | FILE_FLAG_NO_BUFFERING
         flags_fast = raw_flags if raw_flags < 0x80000000 else raw_flags - 0x100000000
 
         fast_mode_active = False
@@ -368,8 +365,6 @@ exit
         emit({"status": "[DEBUG] Running Diskpart. Please wait..."})
         build_res = run_cmd(["diskpart"], input=dp_script, capture_output=True, text=True)
         
-        emit({"status": f"[DEBUG] Diskpart Flash Output:\n{build_res.stdout.strip()}"})
-        
         if "Virtual Disk Service error" in build_res.stdout or "encountered an error" in build_res.stdout:
             raise Exception("Diskpart formatting failed. Open Debug Console in Settings to see exact error.")
         
@@ -460,7 +455,7 @@ exit
             with open(src, 'rb') as fsrc, open(dest, 'wb') as fdst:
                 while True:
                     check_cancel()
-                    chunk = fsrc.read(1024 * 1024 * 4) 
+                    chunk = fsrc.read(1024 * 1024 * 16) 
                     if not chunk: break
                     fdst.write(chunk)
                     copied_bytes += len(chunk)

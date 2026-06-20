@@ -28,7 +28,7 @@
       "nsis"
     ],
     "externalBin": [
-      "bin/engine"
+      "bin/zozstry-core"
     ],
     "icon": [
       "icons/32x32.png",

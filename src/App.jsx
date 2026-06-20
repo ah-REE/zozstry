@@ -48,17 +48,20 @@ export default function App() {
              setErrorMsg(data.error);
              setIsFlashing(false);
           } else {
-             setFlashProgress(data.progress);
-             
-             const statusParts = data.status.split(" @ ");
-             setFlashStatus(statusParts[0]);
-             if (statusParts.length > 1) {
-               setSpeed(statusParts[1]);
-             } else {
-               setSpeed("");
+             // FIX: Only update the progress number if the engine actually sent one
+             if (data.progress !== undefined && data.progress !== null) {
+                 setFlashProgress(data.progress);
+                 if (data.progress === 100) setIsFlashing(false);
              }
-
-             if (data.progress === 100) setIsFlashing(false);
+             
+             // FIX: Only update the text if the engine sent text
+             if (data.status) {
+                 const statusParts = data.status.split(" @ ");
+                 setFlashStatus(statusParts[0]);
+                 if (statusParts.length > 1) {
+                   setSpeed(statusParts[1]);
+                 }
+             }
           }
         } catch (e) {
           setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [RAW] ${event.payload}`]);
@@ -213,11 +216,11 @@ export default function App() {
         transition={{ duration: 0.5, ease: "easeOut" }}
         className="w-full max-w-xl max-h-[90vh] flex flex-col bg-white/[0.02] backdrop-blur-2xl border border-white/10 rounded-3xl shadow-2xl relative z-10"
       >
-        <div className="px-8 py-5 border-b border-white/5 flex items-center justify-center flex-shrink-0">
+        <div className="px-8 py-2 border-b border-white/5 flex items-center justify-center flex-shrink-0">
           <img 
             src={logo} 
             alt="Zozstry Logo" 
-            className="h-20 object-contain drop-shadow-[0_0_15px_rgba(37,99,235,0.4)]" 
+            className="h-24 object-contain drop-shadow-[0_0_15px_rgba(37,99,235,0.4)]" 
           />
         </div>
 
