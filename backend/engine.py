@@ -6,7 +6,6 @@ import time
 import ctypes
 import hashlib
 import socket
-import shutil
 from ctypes import wintypes
 
 # Global IPC Socket
@@ -14,6 +13,13 @@ ipc_socket = None
 
 # Kill-Switch Flag
 CANCEL_FLAG = os.path.join(os.environ.get('TEMP', ''), 'zozstry_cancel.flag')
+
+# --- SILENCER FUNCTION: Prevents CMD windows from flashing ---
+def run_cmd(*args, **kwargs):
+    if os.name == 'nt':
+        kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
+    return subprocess.run(*args, **kwargs)
+# -------------------------------------------------------------
 
 def emit(data):
     payload = json.dumps(data)
@@ -36,7 +42,6 @@ def is_admin():
     except:
         return False
 
-
 def get_usb_drives():
     try:
         ps_script = """
@@ -54,7 +59,7 @@ def get_usb_drives():
             }
         } | ConvertTo-Json
         """
-        result = subprocess.run(
+        result = run_cmd(
             ["powershell", "-Command", ps_script],
             capture_output=True, text=True, check=True
         )
@@ -79,14 +84,12 @@ def get_usb_drives():
     except Exception as e:
         return [{"error": str(e)}]
 
-
 def verify_safety(device_id):
     disk_num = device_id.replace(r"\\.\PHYSICALDRIVE", "")
     cmd = f"(Get-Disk -Number {disk_num}).BusType"
-    result = subprocess.run(["powershell", "-Command", cmd], capture_output=True, text=True)
+    result = run_cmd(["powershell", "-Command", cmd], capture_output=True, text=True)
     if "USB" not in result.stdout:
         raise Exception(f"SAFETY ABORT: Target {device_id} is not a USB device (Bus: {result.stdout.strip()}).")
-
 
 def restore_drive(device_id):
     try:
@@ -96,7 +99,7 @@ def restore_drive(device_id):
         disk_num = device_id.replace(r"\\.\PHYSICALDRIVE", "")
 
         ps_drop = f"Clear-Disk -Number {disk_num} -RemoveData -RemoveOEM -Confirm:$false -ErrorAction SilentlyContinue"
-        subprocess.run(["powershell", "-Command", ps_drop], capture_output=True)
+        run_cmd(["powershell", "-Command", ps_drop], capture_output=True)
         time.sleep(1)
 
         emit({"progress": 20, "status": "Executing raw hardware wipe..."})
@@ -147,7 +150,7 @@ def restore_drive(device_id):
         emit({"progress": 40, "status": "Analyzing hardware capacity..."})
         
         ps_size = f"(Get-Disk -Number {disk_num}).Size"
-        size_res = subprocess.run(["powershell", "-Command", ps_size], capture_output=True, text=True)
+        size_res = run_cmd(["powershell", "-Command", ps_size], capture_output=True, text=True)
         try:
             disk_bytes = int(size_res.stdout.strip())
             fs_type = "fat32" if disk_bytes <= 34359738368 else "exfat"
@@ -163,11 +166,12 @@ rescan
 clean
 convert mbr
 create partition primary
+select partition 1
 format fs={fs_type} unit={cluster_size} quick label="ZOZSTRY"
 assign
 exit
 """
-        build_res = subprocess.run(["diskpart"], input=dp_script, capture_output=True, text=True)
+        build_res = run_cmd(["diskpart"], input=dp_script, capture_output=True, text=True)
         
         emit({"status": f"[DEBUG] Diskpart Restore Output:\n{build_res.stdout.strip()}"})
         
@@ -192,7 +196,7 @@ exit
         Write-Output $letter
         """
 
-        result = subprocess.run(
+        result = run_cmd(
             ["powershell", "-Command", ps_get_letter],
             capture_output=True, text=True
         )
@@ -210,7 +214,6 @@ exit
     except Exception as e:
         emit({"error": f"Restore failed: {str(e)}"})
 
-
 def flash_linux_dd(device_id, file_path, verify=False):
     """ The Block-by-Block Direct-To-Metal Writer for Linux ISOs """
     fd_out = None
@@ -219,7 +222,7 @@ def flash_linux_dd(device_id, file_path, verify=False):
         emit({"progress": 1, "status": "Dropping volume locks natively..."})
         disk_num = device_id.replace(r"\\.\PHYSICALDRIVE", "")
         dp_script = f"select disk {disk_num}\nclean\nexit\n"
-        subprocess.run(["diskpart"], input=dp_script, capture_output=True, text=True)
+        run_cmd(["diskpart"], input=dp_script, capture_output=True, text=True)
         time.sleep(1.5)
 
         total_bytes_to_write = os.path.getsize(file_path)
@@ -316,7 +319,6 @@ def flash_linux_dd(device_id, file_path, verify=False):
         if fd_in is not None and not fd_in.closed:
             fd_in.close()
 
-
 def flash_windows_inverted_phantom(device_id, file_path, verify=False, force_gpt=False):
     """ The Inverted Phantom Architecture for Windows ISOs (NTFS USP) """
     iso_mounted = False
@@ -326,7 +328,7 @@ def flash_windows_inverted_phantom(device_id, file_path, verify=False, force_gpt
         
         emit({"progress": 1, "status": "Mounting Windows ISO..."})
         ps_mount = f'Mount-DiskImage -ImagePath "{file_path}" -PassThru | Get-Volume | Select-Object -ExpandProperty DriveLetter'
-        res = subprocess.run(["powershell", "-Command", ps_mount], capture_output=True, text=True)
+        res = run_cmd(["powershell", "-Command", ps_mount], capture_output=True, text=True)
         iso_letter = res.stdout.strip()
         if not iso_letter:
             raise Exception("Failed to mount ISO. File may be corrupted.")
@@ -335,7 +337,7 @@ def flash_windows_inverted_phantom(device_id, file_path, verify=False, force_gpt
 
         emit({"progress": 3, "status": "Calculating Inverted Partitions..."})
         ps_size = f"(Get-Disk -Number {disk_num}).Size"
-        size_res = subprocess.run(["powershell", "-Command", ps_size], capture_output=True, text=True)
+        size_res = run_cmd(["powershell", "-Command", ps_size], capture_output=True, text=True)
         try:
             total_bytes = int(size_res.stdout.strip())
             data_size_mb = (total_bytes // (1024 * 1024)) - 1500
@@ -352,9 +354,11 @@ def flash_windows_inverted_phantom(device_id, file_path, verify=False, force_gpt
 clean
 convert {partition_style}
 create partition primary size={data_size_mb}
+select partition 1
 format fs=ntfs quick label="ZOZ_DATA"
 assign
 create partition primary
+select partition 2
 format fs=fat32 quick label="ZOZ_BOOT"
 {active_cmd}
 assign
@@ -362,9 +366,8 @@ rescan
 exit
 """
         emit({"status": "[DEBUG] Running Diskpart. Please wait..."})
-        build_res = subprocess.run(["diskpart"], input=dp_script, capture_output=True, text=True)
+        build_res = run_cmd(["diskpart"], input=dp_script, capture_output=True, text=True)
         
-        # EXPLICITLY output diskpart errors to the debug console
         emit({"status": f"[DEBUG] Diskpart Flash Output:\n{build_res.stdout.strip()}"})
         
         if "Virtual Disk Service error" in build_res.stdout or "encountered an error" in build_res.stdout:
@@ -378,7 +381,6 @@ exit
         ntfs_guid = None
         ntfs_letter = None
         
-        # Bypasses the storage cache lag entirely by directly hitting the WMI hardware object
         ps_get_volumes = f"""
         $vols = Get-WmiObject Win32_Volume
         foreach ($v in $vols) {{
@@ -390,7 +392,7 @@ exit
         """
         
         for _ in range(30):
-            res = subprocess.run(["powershell", "-Command", ps_get_volumes], capture_output=True, text=True)
+            res = run_cmd(["powershell", "-Command", ps_get_volumes], capture_output=True, text=True)
             for line in res.stdout.strip().split('\n'):
                 parts = line.split('|')
                 if len(parts) == 3:
@@ -422,7 +424,6 @@ exit
                 rel_lower = rel_path.lower()
                 size = os.path.getsize(src_path)
                 
-                # Rule 1: EVERYTHING clones to Partition 1 (NTFS) so WinPE finds it.
                 dest_data = os.path.join(ntfs_guid, rel_path)
                 files_to_copy.append((src_path, dest_data, size))
                 total_copy_bytes += size
@@ -431,7 +432,6 @@ exit
                     payload_src_path = src_path
                     payload_dest_path = dest_data
 
-                # Rule 2: ONLY Boot-critical files go to Partition 2 (FAT32) for UEFI firmware.
                 is_boot_critical = (
                     rel_lower.startswith("efi\\") or 
                     rel_lower.startswith("boot\\") or 
@@ -478,7 +478,7 @@ exit
         target_letter = fat32_letter or ntfs_letter
         
         if target_letter and os.path.exists(bootsect_iso_path):
-            subprocess.run([bootsect_iso_path, "/nt60", f"{target_letter}:", "/mbr", "/force"], capture_output=True)
+            run_cmd([bootsect_iso_path, "/nt60", f"{target_letter}:", "/mbr", "/force"], capture_output=True)
 
         if verify and payload_src_path and payload_dest_path:
             emit({"progress": 99, "status": "Executing cryptographic verification..."})
@@ -504,8 +504,7 @@ exit
     finally:
         if iso_mounted:
             ps_unmount = f'Dismount-DiskImage -ImagePath "{file_path}"'
-            subprocess.run(["powershell", "-Command", ps_unmount], capture_output=True)
-
+            run_cmd(["powershell", "-Command", ps_unmount], capture_output=True)
 
 def flash_drive(device_id, file_path, verify=False, force_gpt=False, persistent_mb=0):
     """ The Auto-Sense Engine Router """
@@ -519,7 +518,7 @@ def flash_drive(device_id, file_path, verify=False, force_gpt=False, persistent_
         emit({"progress": 0, "status": "Interrogating ISO payload..."})
         
         ps_mount = f'Mount-DiskImage -ImagePath "{file_path}" -PassThru | Get-Volume | Select-Object -ExpandProperty DriveLetter'
-        res = subprocess.run(["powershell", "-Command", ps_mount], capture_output=True, text=True)
+        res = run_cmd(["powershell", "-Command", ps_mount], capture_output=True, text=True)
         iso_letter = res.stdout.strip()
         
         os_type = "LINUX"
@@ -532,21 +531,19 @@ def flash_drive(device_id, file_path, verify=False, force_gpt=False, persistent_
                 os_type = "WINDOWS"
                 
             ps_unmount = f'Dismount-DiskImage -ImagePath "{file_path}"'
-            subprocess.run(["powershell", "-Command", ps_unmount], capture_output=True)
+            run_cmd(["powershell", "-Command", ps_unmount], capture_output=True)
 
         if os_type == "WINDOWS":
             emit({"progress": 0, "status": "Windows OS detected. Initializing Inverted Phantom Router..."})
             flash_windows_inverted_phantom(device_id, file_path, verify, force_gpt)
         else:
             emit({"progress": 0, "status": "Linux OS detected. Initializing Direct Block Writer..."})
-            # Persistent storage logic will eventually go here
             flash_linux_dd(device_id, file_path, verify)
 
     except PermissionError:
         emit({"error": "PERMISSION DENIED: Run as Administrator!"})
     except Exception as e:
         emit({"error": f"Flashing failed: {str(e)}"})
-
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
@@ -568,11 +565,18 @@ if __name__ == "__main__":
                 server.listen(1)
                 bridge_port = server.getsockname()[1]
 
-                script = os.path.abspath(sys.argv[0])
                 params = ' '.join([f'"{arg}"' for arg in sys.argv[1:]])
                 params += f' --ipc {bridge_port}'
-                
-                ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, f'"{script}" {params}', None, 0)
+
+                if getattr(sys, 'frozen', False):
+                    exe_path = sys.executable
+                    exe_params = params
+                else:
+                    script = os.path.abspath(sys.argv[0])
+                    exe_path = sys.executable
+                    exe_params = f'"{script}" {params}'
+
+                ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", exe_path, exe_params, None, 0)
                 
                 if int(ret) <= 32:
                     print(json.dumps({"error": "Admin privileges required. UAC prompt was rejected."}))
