@@ -214,8 +214,6 @@ exit
 
 def flash_linux_dd(device_id, file_path, verify=False):
     """ The Block-by-Block Direct-To-Metal Writer for Linux ISOs """
-    fd_out = None
-    fd_in = None
     try:
         emit({"progress": 1, "status": "Dropping volume locks natively..."})
         disk_num = device_id.replace(r"\\.\PHYSICALDRIVE", "")
@@ -229,56 +227,32 @@ def flash_linux_dd(device_id, file_path, verify=False):
 
         emit({"progress": 2, "status": "Initializing direct-to-metal stream..."})
 
-        flags_standard = os.O_RDWR | getattr(os, "O_BINARY", 0)
-        FILE_FLAG_NO_BUFFERING = 0x20000000
-
-        raw_flags = flags_standard | FILE_FLAG_NO_BUFFERING
-        flags_fast = raw_flags if raw_flags < 0x80000000 else raw_flags - 0x100000000
-
-        fast_mode_active = False
-        try:
-            fd_out = os.open(device_id, flags_fast)
-            fast_mode_active = True
-        except (OSError, OverflowError):
-            fd_out = os.open(device_id, flags_standard)
-
-        fd_in = open(file_path, "rb")
+        # Upgraded to 4096 to support modern Advanced Format (4K Native) USB drives
+        SECTOR_SIZE = 4096
         start_time = time.time()
         last_reported = -1
 
-        while True:
-            check_cancel()
-            chunk = fd_in.read(chunk_size)
-            if not chunk: break
+        # Standard binary IO entirely eliminates the memory-alignment NO_BUFFERING crashes
+        with open(file_path, "rb") as fd_in, open(device_id, "rb+") as fd_out:
+            while True:
+                check_cancel()
+                chunk = fd_in.read(chunk_size)
+                if not chunk: break
 
-            if fast_mode_active and len(chunk) % 512 != 0:
-                os.close(fd_out)
-                fd_out = os.open(device_id, flags_standard)
-                fast_mode_active = False
+                remainder = len(chunk) % SECTOR_SIZE
+                if remainder > 0:
+                    chunk += b'\x00' * (SECTOR_SIZE - remainder)
 
-            try:
-                os.write(fd_out, chunk)
-            except OSError as e:
-                if fast_mode_active:
-                    os.close(fd_out)
-                    fd_out = os.open(device_id, flags_standard)
-                    fast_mode_active = False
-                    os.write(fd_out, chunk)
-                else:
-                    raise e
+                fd_out.write(chunk)
 
-            bytes_done += len(chunk)
-            elapsed = time.time() - start_time
-            speed = (bytes_done / 1048576) / max(0.001, elapsed)
-            progress = 2 + int((bytes_done / total_bytes_to_write) * 96)
+                bytes_done += len(chunk)
+                elapsed = time.time() - start_time
+                speed = (bytes_done / 1048576) / max(0.001, elapsed)
+                progress = 2 + int((bytes_done / total_bytes_to_write) * 96)
 
-            if progress != last_reported:
-                last_reported = progress
-                emit({"progress": min(98, progress), "status": f"Writing... {progress}% @ {speed:.2f} MB/s"})
-
-        fd_in.close()
-        os.close(fd_out)
-        fd_out = None
+                if progress != last_reported:
+                    last_reported = progress
+                    emit({"progress": min(98, progress), "status": f"Writing... {progress}% @ {speed:.2f} MB/s"})
 
         if verify:
             emit({"progress": 99, "status": "Verifying data integrity..."})
@@ -289,18 +263,15 @@ def flash_linux_dd(device_id, file_path, verify=False):
                     source_hash.update(v_chunk)
             
             usb_hash = hashlib.sha256()
-            fd_read = os.open(device_id, os.O_RDONLY | getattr(os, "O_BINARY", 0))
-            try:
+            with open(device_id, "rb") as fd_read:
                 bytes_read = 0
                 while bytes_read < total_bytes_to_write:
                     check_cancel()
                     read_size = min(chunk_size, total_bytes_to_write - bytes_read)
-                    v_chunk = os.read(fd_read, read_size)
+                    v_chunk = fd_read.read(read_size)
                     if not v_chunk: break
                     usb_hash.update(v_chunk)
                     bytes_read += len(v_chunk)
-            finally:
-                os.close(fd_read)
 
             if source_hash.hexdigest() != usb_hash.hexdigest():
                 raise Exception("Verification failed: Data integrity error.")
@@ -309,12 +280,6 @@ def flash_linux_dd(device_id, file_path, verify=False):
 
     except Exception as e:
         emit({"error": f"Deployment failed: {str(e)}"})
-    finally:
-        if fd_out is not None:
-            try: os.close(fd_out)
-            except OSError: pass
-        if fd_in is not None and not fd_in.closed:
-            fd_in.close()
 
 def flash_windows_inverted_phantom(device_id, file_path, verify=False, force_gpt=False):
     """ The Inverted Phantom Architecture for Windows ISOs (NTFS USP) """
