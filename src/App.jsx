@@ -34,43 +34,38 @@ export default function App() {
     if (autoVerify) setVerifyData(true);
   }, [autoVerify]);
 
-  // Ensure the IPC listener only binds once on app mount to prevent double-logging
+  // Memory leak and race condition prevention for the Tauri listener
   useEffect(() => {
-    let unlisten;
-    const setup = async () => {
-      unlisten = await listen("flash-progress", (event) => {
-        try {
-          const data = JSON.parse(event.payload);
-          
-          setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${data.status || JSON.stringify(data)}`]);
+    const unlistenPromise = listen("flash-progress", (event) => {
+      try {
+        const data = JSON.parse(event.payload);
+        
+        setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${data.status || JSON.stringify(data)}`]);
 
-          if (data.error) {
-             setErrorMsg(data.error);
-             setIsFlashing(false);
-          } else {
-             // FIX: Only update the progress number if the engine actually sent one
-             if (data.progress !== undefined && data.progress !== null) {
-                 setFlashProgress(data.progress);
-                 if (data.progress === 100) setIsFlashing(false);
-             }
-             
-             // FIX: Only update the text if the engine sent text
-             if (data.status) {
-                 const statusParts = data.status.split(" @ ");
-                 setFlashStatus(statusParts[0]);
-                 if (statusParts.length > 1) {
-                   setSpeed(statusParts[1]);
-                 }
-             }
-          }
-        } catch (e) {
-          setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [RAW] ${event.payload}`]);
+        if (data.error) {
+           setErrorMsg(data.error);
+           setIsFlashing(false);
+        } else {
+           if (data.progress !== undefined && data.progress !== null) {
+               setFlashProgress(data.progress);
+               if (data.progress === 100) setIsFlashing(false);
+           }
+           
+           if (data.status) {
+               const statusParts = data.status.split(" @ ");
+               setFlashStatus(statusParts[0]);
+               if (statusParts.length > 1) {
+                 setSpeed(statusParts[1]);
+               }
+           }
         }
-      });
-    };
-    setup();
+      } catch (e) {
+        setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] [RAW] ${event.payload}`]);
+      }
+    });
+
     return () => {
-      if (unlisten) unlisten();
+      unlistenPromise.then(unlistenFn => unlistenFn());
     };
   }, []);
 
@@ -125,7 +120,12 @@ export default function App() {
         persistentStorage: parseInt(persistentStorage)
       });
     } catch (err) {
-      setErrorMsg(err.toString());
+      const errorMessage = err.toString();
+      if (errorMessage.includes("126") || errorMessage.includes("Authentication was canceled") || errorMessage.includes("authorization protocol")) {
+        setErrorMsg("Process canceled: Administrator permission is required to modify USB hardware.");
+      } else {
+        setErrorMsg(errorMessage);
+      }
       setIsFlashing(false);
     }
   };
@@ -170,14 +170,20 @@ export default function App() {
     try {
       await invoke("restore_drive", { deviceId: selectedDrive });
     } catch (err) {
-      setErrorMsg(err.toString());
+      const errorMessage = err.toString();
+      if (errorMessage.includes("126") || errorMessage.includes("Authentication was canceled") || errorMessage.includes("authorization protocol")) {
+        setErrorMsg("Process canceled: Administrator permission is required to modify USB hardware.");
+      } else {
+        setErrorMsg(errorMessage);
+      }
       setIsFlashing(false);
     }
   };
 
   useEffect(() => { scanDrives(); }, []);
 
-  const displayIsoName = isoFile ? (isoFile.split('\\').pop() || isoFile.split('/').pop()) : "";
+  // Robust Regex for extracting filenames correctly on both Windows and Linux paths
+  const displayIsoName = isoFile ? isoFile.replace(/^.*[\\\/]/, '') : "";
 
   return (
     <main className="fixed inset-0 w-screen h-screen bg-[#0a0a0c] text-white flex items-center justify-center font-sans overflow-hidden">
